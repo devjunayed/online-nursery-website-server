@@ -105,6 +105,7 @@ async function run() {
 
     /// {{{Category}}}
 
+    // creating category
     app.post("/category", uploadCategory.single("image"), async (req, res) => {
       const data = req.body;
       const file = req.file;
@@ -118,6 +119,14 @@ async function run() {
       data.image = `${process.env.API_URL}/uploads/category/${file.filename}`;
       const result = await categoryCollection.insertOne(data);
       res.send(sendResponse(true, "Category created successfully", result));
+    });
+
+    // get all category
+    app.get("/category", async (req, res) => {
+      const result = await categoryCollection.find().toArray();
+      res.send(
+        sendResponse(true, "Category data fetched successfully", result)
+      );
     });
   } finally {
     // Ensures that the client will close when you finish/error
