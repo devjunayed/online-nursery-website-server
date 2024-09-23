@@ -20,7 +20,6 @@ app.use("/uploads", express.static("uploads"));
 
 const uri = process.env.URI;
 
-console.log(uri);
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
@@ -56,7 +55,7 @@ const productsStorage = multer.diskStorage({
 });
 
 const uploadCategory = multer({
-  categoryStorage,
+  storage: categoryStorage,
   dest: "./uploads/category",
   limits: { fileSize: 5 * 1024 * 1024 }, // Optional: limit file size to 5MB
   fileFilter: (req, file, cb) => {
@@ -72,7 +71,7 @@ const uploadCategory = multer({
   },
 });
 const uploadProduct = multer({
-  productsStorage,
+  storage: productsStorage,
   dest: "./uploads/products",
   limits: { fileSize: 5 * 1024 * 1024 }, // Optional: limit file size to 5MB
   fileFilter: (req, file, cb) => {
@@ -135,7 +134,6 @@ async function run() {
         _id: new ObjectId(req.params.id),
       });
 
-      console.log(req.params.id, result);
       res.send(sendResponse(true, "Product retrieved successfully", result));
     });
 
@@ -158,7 +156,6 @@ async function run() {
         if (file) {
           newData.image = `${process.env.API_URL}/uploads/products/${file.filename}`;
         }
-        console.log(newData);
 
         const result = await productCollection.updateOne(
           {
@@ -216,7 +213,6 @@ async function run() {
         if (file) {
           newData.image = `${process.env.API_URL}/uploads/category/${file.filename}`;
         }
-        console.log(newData);
 
         const result = await categoryCollection.updateOne(
           {
