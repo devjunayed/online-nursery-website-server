@@ -2,10 +2,10 @@ import { MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-import sendResponse from "./utils.js";
+import sendResponse from "./utils.js"; // Assume sendResponse is a utility for sending responses
+import cloudinary from "cloudinary";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 
 dotenv.config();
 
@@ -14,13 +14,29 @@ const app = express();
 // middleware
 app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
 
-// setting mongodb
+// Cloudinary config
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
+// Create a Cloudinary storage
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary.v2,
+  params: {
+    folder: "products", // Folder name in your Cloudinary account
+    format: async (req, file) => "jpg", // Supports 'png', 'jpg', etc.
+    public_id: (req, file) => `${file.fieldname}-${Date.now()}`, // Unique public ID for each file
+  },
+});
+
+// Multer middleware using Cloudinary storage
+const upload = multer({ storage });
+
+// MongoDB setup
 const uri = process.env.URI;
-
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -29,79 +45,17 @@ const client = new MongoClient(uri, {
   },
 });
 
-// multer setup
-const categoryStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "./uploads/category");
-  },
-  filename: (req, file, cb) => {
-    // Get the file extension from the original file name
-    const ext = path.extname(file.originalname);
-    // Use a unique identifier for the filename (e.g., Date.now())
-    cb(null, `${file.fieldname}-${Date.now()}${ext}`);
-  },
-});
-
-const productsStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "./uploads/products");
-  },
-  filename: (req, file, cb) => {
-    // Get the file extension from the original file name
-    const ext = path.extname(file.originalname);
-    // Use a unique identifier for the filename (e.g., Date.now())
-    cb(null, `${file.fieldname}-${Date.now()}${ext}`);
-  },
-});
-
-const uploadCategory = multer({
-  storage: categoryStorage,
-  dest: "./uploads/category",
-  limits: { fileSize: 5 * 1024 * 1024 }, // Optional: limit file size to 5MB
-  fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|gif|ico/;
-    const mimetype = filetypes.test(file.mimetype);
-    const extname = filetypes.test(
-      path.extname(file.originalname).toLowerCase()
-    );
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-    cb(new Error("Only images are allowed (jpeg, jpg, png)"));
-  },
-});
-const uploadProduct = multer({
-  storage: productsStorage,
-  dest: "./uploads/products",
-  limits: { fileSize: 5 * 1024 * 1024 }, // Optional: limit file size to 5MB
-  fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|gif|ico/;
-    const mimetype = filetypes.test(file.mimetype);
-    const extname = filetypes.test(
-      path.extname(file.originalname).toLowerCase()
-    );
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-    cb(new Error("Only images are allowed (jpeg, jpg, png)"));
-  },
-});
-
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
+    // Connect the client to the MongoDB server
     await client.connect();
 
-    // collection
-    const productCollection = await client.db("nursery").collection("products");
-    const categoryCollection = await client
-      .db("nursery")
-      .collection("category");
+    // Collections for products and categories
+    const productCollection = client.db("nursery").collection("products");
+    const categoryCollection = client.db("nursery").collection("category");
 
-    /// {{{{Products}}}}
-
-    // creating product
-    app.post("/products", uploadProduct.single("image"), async (req, res) => {
+    // Create Product Endpoint
+    app.post("/products", upload.single("image"), async (req, res) => {
       const formData = req.body;
       const file = req.file;
 
@@ -110,69 +64,90 @@ async function run() {
           .status(400)
           .send(sendResponse(false, "No image uploaded", {}));
       }
-      formData.image = `${process.env.API_URL}/uploads/products/${file.filename}`;
-      const result = await productCollection.insertOne(req.body);
+
+      // Store Cloudinary URL
+      formData.image = file.path;
+
+      // Insert product data into the MongoDB collection
+      const result = await productCollection.insertOne(formData);
       res.send(
         sendResponse(true, "Product created successfully", {
           ...result,
-          ...req.body,
+          ...formData,
         })
       );
     });
 
-    // get all products
+    // Get all products
     app.get("/products", async (req, res) => {
       const result = await productCollection.find().toArray();
       res.send(
-        sendResponse(true, "All products retieved successfully", result)
+        sendResponse(true, "All products retrieved successfully", result)
       );
     });
 
-    // get single products
+    // Get single product by ID
     app.get("/products/:id", async (req, res) => {
       const result = await productCollection.findOne({
         _id: new ObjectId(req.params.id),
       });
-
       res.send(sendResponse(true, "Product retrieved successfully", result));
     });
 
-    // deleting products
+    // Delete product and associated image
     app.delete("/products/:id", async (req, res) => {
-      const result = await productCollection.deleteOne({
-        _id: new ObjectId(req.params.id),
-      });
-      res.send(sendResponse(true, "Products deleted  successfully", result));
-    });
+      try {
+        // Find the product by ID
+        const product = await productCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-    // update products
-    app.patch(
-      "/products/:id",
-      uploadProduct.single("image"),
-      async (req, res) => {
-        const newData = req.body;
-        const file = req.file;
-
-        if (file) {
-          newData.image = `${process.env.API_URL}/uploads/products/${file.filename}`;
+        if (!product) {
+          return res
+            .status(404)
+            .send(sendResponse(false, "Product not found", {}));
         }
 
-        const result = await productCollection.updateOne(
-          {
-            _id: new ObjectId(req.params.id),
-          },
-          {
-            $set: newData,
-          }
+        // Extract the public ID from the image URL
+        const imageUrl = product.image;
+        const publicId = imageUrl.split("/").pop().split(".")[0]; // Extracts the public ID
+
+        // Delete the image from Cloudinary
+        await cloudinary.v2.uploader.destroy(publicId);
+
+        // Delete the product from the database
+        const result = await productCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        res.send(
+          sendResponse(true, "Product and image deleted successfully", result)
         );
-        res.send(sendResponse(true, "Products updated  successfully", result));
+      } catch (err) {
+        res
+          .status(500)
+          .send(sendResponse(false, "Error deleting product", err.message));
       }
-    );
+    });
+    // Update product
+    app.patch("/products/:id", upload.single("image"), async (req, res) => {
+      const newData = req.body;
+      const file = req.file;
 
-    /// {{{Category}}}
+      if (file) {
+        // Update the image URL with Cloudinary URL if a new image is uploaded
+        newData.image = file.path;
+      }
 
-    // creating category
-    app.post("/category", uploadCategory.single("image"), async (req, res) => {
+      const result = await productCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: newData }
+      );
+      res.send(sendResponse(true, "Product updated successfully", result));
+    });
+
+    // Category endpoints can follow a similar pattern
+    app.post("/category", upload.single("image"), async (req, res) => {
       const data = req.body;
       const file = req.file;
 
@@ -182,51 +157,73 @@ async function run() {
           .send(sendResponse(false, "No image uploaded", {}));
       }
 
-      data.image = `${process.env.API_URL}/uploads/category/${file.filename}`;
+      // Store Cloudinary URL
+      data.image = file.path;
+
+      // Insert category data into the MongoDB collection
       const result = await categoryCollection.insertOne(data);
       res.send(sendResponse(true, "Category created successfully", result));
     });
 
-    // get all category
     app.get("/category", async (req, res) => {
       const result = await categoryCollection.find().toArray();
       res.send(
-        sendResponse(true, "Category data fetched successfully", result)
+        sendResponse(true, "All categories retrieved successfully", result)
       );
     });
-    // delete category
+
+    // Delete category and associated image
     app.delete("/category/:id", async (req, res) => {
-      const result = await categoryCollection.deleteOne({
-        _id: new ObjectId(req.params.id),
-      });
-      res.send(sendResponse(true, "Category deleted  successfully", result));
-    });
+      try {
+        // Find the category by ID
+        const category = await categoryCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-    // update category
-    app.patch(
-      "/category/:id",
-      uploadCategory.single("image"),
-      async (req, res) => {
-        const newData = req.body;
-        const file = req.file;
-
-        if (file) {
-          newData.image = `${process.env.API_URL}/uploads/category/${file.filename}`;
+        if (!category) {
+          return res
+            .status(404)
+            .send(sendResponse(false, "Category not found", {}));
         }
 
-        const result = await categoryCollection.updateOne(
-          {
-            _id: new ObjectId(req.params.id),
-          },
-          {
-            $set: newData,
-          }
-        );
-        res.send(sendResponse(true, "Category updated  successfully", result));
-      }
-    );
+        // Extract the public ID from the image URL
+        const imageUrl = category.image;
+        const publicId = imageUrl.split("/").pop().split(".")[0]; // Extracts the public ID
 
-    // global error handling
+        // Delete the image from Cloudinary
+        await cloudinary.v2.uploader.destroy(publicId);
+
+        // Delete the category from the database
+        const result = await categoryCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        res.send(
+          sendResponse(true, "Category and image deleted successfully", result)
+        );
+      } catch (err) {
+        res
+          .status(500)
+          .send(sendResponse(false, "Error deleting category", err.message));
+      }
+    });
+
+    app.patch("/category/:id", upload.single("image"), async (req, res) => {
+      const newData = req.body;
+      const file = req.file;
+
+      if (file) {
+        newData.image = file.path;
+      }
+
+      const result = await categoryCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: newData }
+      );
+      res.send(sendResponse(true, "Category updated successfully", result));
+    });
+
+    // Global error handling middleware
     app.use((err, req, res, next) => {
       console.error(err.stack); // Log the error stack for debugging
 
@@ -243,15 +240,15 @@ async function run() {
 }
 run().catch(console.dir);
 
-run().catch((err) => console.log(err));
-
-// get route
+// Root route to check if the server is working
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
     message: "Server is working",
   });
 });
+
+// Start the server on the specified port
 app.listen(process.env.PORT, () => {
   console.log(`Server is listening on http://localhost:${process.env.PORT}`);
 });

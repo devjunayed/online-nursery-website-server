@@ -4,3 +4,4 @@ uploads/category/*
 !uploads/category/*.txt
 uploads/products/*
 !uploads/products/*.txt
+.vercel
