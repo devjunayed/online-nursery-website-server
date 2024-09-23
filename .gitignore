@@ -1,3 +1,6 @@
 node_modules
 .env
-uploads
+uploads/category/*
+!uploads/category/*.txt
+uploads/products/*
+!uploads/products/*.txt
