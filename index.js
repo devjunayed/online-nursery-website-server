@@ -3,9 +3,6 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import sendResponse from "./utils.js"; // Assume sendResponse is a utility for sending responses
-import cloudinary from "cloudinary";
-import multer from "multer";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
 
 dotenv.config();
 
@@ -14,26 +11,6 @@ const app = express();
 // middleware
 app.use(cors());
 app.use(express.json());
-
-// Cloudinary config
-cloudinary.v2.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-// Create a Cloudinary storage
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary.v2,
-  params: {
-    folder: "products", // Folder name in your Cloudinary account
-    format: async (req, file) => "jpg", // Supports 'png', 'jpg', etc.
-    public_id: (req, file) => `${file.fieldname}-${Date.now()}`, // Unique public ID for each file
-  },
-});
-
-// Multer middleware using Cloudinary storage
-const upload = multer({ storage });
 
 // MongoDB setup
 const uri = process.env.URI;
@@ -54,19 +31,12 @@ async function run() {
     const productCollection = client.db("nursery").collection("products");
     const categoryCollection = client.db("nursery").collection("category");
 
+    /*=====================================
+                Products
+    ========================================*/
     // Create Product Endpoint
-    app.post("/products", upload.single("image"), async (req, res) => {
+    app.post("/products", async (req, res) => {
       const formData = req.body;
-      const file = req.file;
-
-      if (!file) {
-        return res
-          .status(400)
-          .send(sendResponse(false, "No image uploaded", {}));
-      }
-
-      // Store Cloudinary URL
-      formData.image = file.path;
 
       // Insert product data into the MongoDB collection
       const result = await productCollection.insertOne(formData);
@@ -94,50 +64,25 @@ async function run() {
       res.send(sendResponse(true, "Product retrieved successfully", result));
     });
 
-    // Delete product and associated image
+    // Delete product
     app.delete("/products/:id", async (req, res) => {
       try {
-        // Find the product by ID
-        const product = await productCollection.findOne({
-          _id: new ObjectId(req.params.id),
-        });
-
-        if (!product) {
-          return res
-            .status(404)
-            .send(sendResponse(false, "Product not found", {}));
-        }
-
-        // Extract the public ID from the image URL
-        const imageUrl = product.image;
-        const publicId = imageUrl.split("/").pop().split(".")[0]; // Extracts the public ID
-
-        // Delete the image from Cloudinary
-        await cloudinary.v2.uploader.destroy(publicId);
-
         // Delete the product from the database
         const result = await productCollection.deleteOne({
           _id: new ObjectId(req.params.id),
         });
 
-        res.send(
-          sendResponse(true, "Product and image deleted successfully", result)
-        );
+        res.send(sendResponse(true, "Product deleted successfully", result));
       } catch (err) {
         res
           .status(500)
           .send(sendResponse(false, "Error deleting product", err.message));
       }
     });
-    // Update product
-    app.patch("/products/:id", upload.single("image"), async (req, res) => {
-      const newData = req.body;
-      const file = req.file;
 
-      if (file) {
-        // Update the image URL with Cloudinary URL if a new image is uploaded
-        newData.image = file.path;
-      }
+    // Update product
+    app.patch("/products/:id", async (req, res) => {
+      const newData = req.body;
 
       const result = await productCollection.updateOne(
         { _id: new ObjectId(req.params.id) },
@@ -146,25 +91,28 @@ async function run() {
       res.send(sendResponse(true, "Product updated successfully", result));
     });
 
-    // Category endpoints can follow a similar pattern
-    app.post("/category", upload.single("image"), async (req, res) => {
+    /*================================================
+                      Category
+      =================================================*/
+    // create category endpoints
+    app.post("/category", async (req, res) => {
       const data = req.body;
-      const file = req.file;
-
-      if (!file) {
-        return res
-          .status(400)
-          .send(sendResponse(false, "No image uploaded", {}));
+    
+      if (!data || Object.keys(data).length === 0) {
+        return res.json(sendResponse(false, "Failed to insert data", ""));
       }
-
-      // Store Cloudinary URL
-      data.image = file.path;
-
-      // Insert category data into the MongoDB collection
-      const result = await categoryCollection.insertOne(data);
-      res.send(sendResponse(true, "Category created successfully", result));
+    
+      try {
+        // Insert category data into the MongoDB collection
+        const result = await categoryCollection.insertOne(data);
+        return res.send(sendResponse(true, "Category created successfully", result));
+      } catch (error) {
+        return res.json(sendResponse(false, "Failed to create category", error));
+      }
     });
+    
 
+    // getting all category data
     app.get("/category", async (req, res) => {
       const result = await categoryCollection.find().toArray();
       res.send(
@@ -172,35 +120,15 @@ async function run() {
       );
     });
 
-    // Delete category and associated image
+    // Delete category
     app.delete("/category/:id", async (req, res) => {
       try {
-        // Find the category by ID
-        const category = await categoryCollection.findOne({
-          _id: new ObjectId(req.params.id),
-        });
-
-        if (!category) {
-          return res
-            .status(404)
-            .send(sendResponse(false, "Category not found", {}));
-        }
-
-        // Extract the public ID from the image URL
-        const imageUrl = category.image;
-        const publicId = imageUrl.split("/").pop().split(".")[0]; // Extracts the public ID
-
-        // Delete the image from Cloudinary
-        await cloudinary.v2.uploader.destroy(publicId);
-
         // Delete the category from the database
         const result = await categoryCollection.deleteOne({
           _id: new ObjectId(req.params.id),
         });
 
-        res.send(
-          sendResponse(true, "Category and image deleted successfully", result)
-        );
+        res.send(sendResponse(true, "Category deleted successfully", result));
       } catch (err) {
         res
           .status(500)
@@ -208,13 +136,9 @@ async function run() {
       }
     });
 
-    app.patch("/category/:id", upload.single("image"), async (req, res) => {
+    // update category
+    app.patch("/category/:id", async (req, res) => {
       const newData = req.body;
-      const file = req.file;
-
-      if (file) {
-        newData.image = file.path;
-      }
 
       const result = await categoryCollection.updateOne(
         { _id: new ObjectId(req.params.id) },
