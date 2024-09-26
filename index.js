@@ -66,86 +66,87 @@ async function run() {
       }
     });
 
-// Get all products
-app.get("/products", async (req, res) => {
-  let {
-    id,
-    page = 0,
-    limit = 10,
-    search = "",
-    category,
-    rating,
-    sortBy = "",
-    sortOrder = "asc" // Default sorting order, can be 'asc' or 'desc'
-  } = req.query;
+    // Get all products
+    app.get("/products", async (req, res) => {
+      let {
+        id,
+        page = 0,
+        limit = 10,
+        search = "",
+        category,
+        rating,
+        sortBy = "",
+        sortOrder = "asc",
+      } = req.query;
 
-  let query = {};
+      let query = {};
 
-  try {
-    // Filter by ID
-    if (id) {
-      query._id = new ObjectId(id);
-    }
+      try {
+        // Filter by ID
+        if (id) {
+          query._id = new ObjectId(id);
+        }
 
-    // Filter by category
-    if (category) {
-      query.category = category;
-    }
+        // Filter by category
+        if (category) {
+          query.category = category;
+        }
 
-    // Filter by rating
-    if (rating) {
-      query.rating = rating;
-    }
+        // Filter by rating
+        if (rating) {
+          query.rating = rating;
+        }
 
-    // Search functionality (search by name or description)
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
-    }
+        // Search functionality (search by name or description)
+        if (search) {
+          query.$or = [
+            { name: { $regex: search, $options: "i" } },
+            { description: { $regex: search, $options: "i" } },
+          ];
+        }
 
-    // Pagination parameters
-    page = parseInt(page);
-    limit = parseInt(limit);
+        // Pagination parameters
+        page = parseInt(page);
+        limit = parseInt(limit);
 
-    // Determine sorting order (1 for ascending, -1 for descending)
-    const sortDirection = sortOrder === "desc" ? -1 : 1;
+        // Determine sorting order (1 for ascending, -1 for descending)
+        const sortDirection = sortOrder === "desc" ? -1 : 1;
 
-    // Sort logic
-    let sort = {};
-    if (sortBy === "title") {
-      sort.title = sortDirection;
-    } else if (sortBy === "price") {
-      sort.price = sortDirection;
-    }
+        // Sort logic
+        let sort = {};
+        if (sortBy === "title") {
+          sort.title = sortDirection;
+        } else if (sortBy === "price") {
+          sort.price = sortDirection;
+        }
 
-    // Total products count
-    const lengthOfProducts = await productCollection.estimatedDocumentCount();
+        // Total products count
+        const lengthOfProducts =
+          await productCollection.estimatedDocumentCount();
 
-    // Fetch products with query, sort, and pagination
-    const result = await productCollection
-      .find(query)
-      .sort(sort) // Apply the sort
-      .skip(page * limit)
-      .limit(limit)
-      .toArray();
+        // Fetch products with query, sort, and pagination
+        const result = await productCollection
+          .find(query)
+          .sort(sort)
+          .skip(page * limit)
+          .limit(limit)
+          .toArray();
 
-    // Send response
-    res.send(
-      sendResponse(
-        true,
-        "All products retrieved successfully",
-        result,
-        lengthOfProducts
-      )
-    );
-  } catch (err) {
-    res
-      .status(500)
-      .send(sendResponse(false, "Error retrieving products", err.message));
-  }
-});
+        // Send response
+        res.send(
+          sendResponse(
+            true,
+            "All products retrieved successfully",
+            result,
+            lengthOfProducts
+          )
+        );
+      } catch (err) {
+        res
+          .status(500)
+          .send(sendResponse(false, "Error retrieving products", err.message));
+      }
+    });
 
     // Get single product by ID
     app.get("/products/:id", async (req, res) => {
@@ -275,75 +276,72 @@ app.get("/products", async (req, res) => {
     // Create cart endpoint
     app.post("/cart", async (req, res) => {
       const data = req.body;
-      const id = `${data._id}`;  
-      delete data._id;  
-    
+      const id = `${data._id}`;
+      delete data._id;
+
       if (!data || Object.keys(data).length === 0) {
         return res.json(sendResponse(false, "Failed to insert data", ""));
       }
-    
+
       try {
         // Finding the product in the product collection
         const productInTheBackend = await productCollection.findOne({
           _id: new ObjectId(id),
         });
-    
+
         if (!productInTheBackend) {
           return res.json(sendResponse(false, "Product not found", ""));
         }
-    
+
         // Checking if we have sufficient quantity of products
         if (
-          Number(productInTheBackend.quantity) < Number(data.quantity) || 
+          Number(productInTheBackend.quantity) < Number(data.quantity) ||
           Number(data.quantity) <= 0
         ) {
           return res.send(sendResponse(false, "Insufficient quantity", []));
         }
-    
+
         // Check if the product is already in the cart
         const cartResult = await cartCollection.findOne({
           productId: new ObjectId(id),
         });
-    
+
         // If product is already in the cart, update the quantity
         if (cartResult) {
           data.quantity = (
             Number(data.quantity) + Number(cartResult.quantity)
           ).toString();
-    
+
           // Update the cart quantity
           const updateResult = await cartCollection.updateOne(
             { _id: new ObjectId(cartResult._id) },
             { $set: data }
           );
-    
-       
-    
+
           return res.send(
             sendResponse(true, "Cart updated successfully", updateResult)
           );
         }
-    
+
         // If product is not in the cart, insert it
         data.productId = new ObjectId(id);
-    
+
         // Update the stock
         await productCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: productInTheBackend }
         );
-    
+
         const result = await cartCollection.insertOne(data);
         return res.send(
           sendResponse(true, "Cart created successfully", result)
         );
-    
       } catch (error) {
         console.log(error);
         return res.json(sendResponse(false, "Failed to create cart", error));
       }
     });
-    
+
     // Get all cart
     app.get("/cart", async (req, res) => {
       try {
@@ -370,15 +368,110 @@ app.get("/products", async (req, res) => {
       }
     });
 
-
+    /*================================================
+                      Order
+    =================================================*/
+    app.post("/order", async (req, res) => {
+      const { name, phone, address, grandTotal, data } = req.body;
+    
+      if (
+        !name ||
+        !phone ||
+        !address ||
+        !grandTotal ||
+        !data ||
+        data.length === 0
+      ) {
+        return res
+          .status(400)
+          .json(sendResponse(false, "Invalid order data", null));
+      }
+    
+      try {
+        // Array to store failed product updates
+        const failedUpdates = [];
+    
+        // Loop through each product in the order
+        for (const item of data) {
+          const productId = item.productId;
+          const orderedQuantity = Number(item.quantity);
+    
+          // Fetch product from database
+          const productInDb = await productCollection.findOne({
+            _id: new ObjectId(productId),
+          });
+    
+          if (!productInDb) {
+            failedUpdates.push({ productId, message: "Product not found" });
+            continue;
+          }
+    
+          // Check if the stock is sufficient
+          if (Number(productInDb.quantity) < orderedQuantity) {
+            failedUpdates.push({
+              productId,
+              message: "Insufficient stock for product",
+            });
+            continue;
+          }
+    
+          // Deduct the quantity from the product stock
+          await productCollection.updateOne(
+            { _id: new ObjectId(productId) },
+            { $set: { quantity: productInDb.quantity - orderedQuantity } }
+          );
+        }
+    
+        // If there are failed updates, respond with errors
+        if (failedUpdates.length > 0) {
+          return res.status(400).json(
+            sendResponse(false, "Some products could not be processed", {
+              failedUpdates,
+            })
+          );
+        }
+    
+        // After processing, create an order in the database
+        const orderData = {
+          name,
+          phone,
+          address,
+          grandTotal,
+          orderedAt: new Date(),
+          products: data,
+        };
+    
+        // Insert the order into a new 'orders' collection
+        const orderResult = await client
+          .db("nursery")
+          .collection("orders")
+          .insertOne(orderData);
+    
+        // Clear the cart after successfully placing the order
+        const deleteCart = await cartCollection.deleteMany({});
+    
+        res.send(
+          sendResponse(true, "Order placed successfully", {
+            ...orderResult,
+            ...orderData,
+          })
+        );
+      } catch (error) {
+        console.error("Error placing order:", error);
+        res
+          .status(500)
+          .json(sendResponse(false, "Failed to place order", error));
+      }
+    });
+    
 
     // Global error handling middleware
     app.use((err, req, res, next) => {
-      console.error(err.stack); // Log the error stack for debugging
+      console.error(err.stack);
       res.status(500).json({
         success: false,
         message: "Something went wrong!",
-        error: err.message, // Provide error message to the client
+        error: err.message,
       });
     });
   } catch (err) {
@@ -398,12 +491,10 @@ app.get("/", (req, res) => {
 // Handle unhandled promise rejections and uncaught exceptions globally
 process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection:", reason);
-  // You can log the error or send a response, but the server will continue running
 });
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
-  // The server won't crash from uncaught exceptions
 });
 
 // Start the server on the specified port
