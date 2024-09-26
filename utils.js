@@ -1,20 +1,24 @@
-export default function sendResponse(success, message, data){
+export default function sendResponse(success, message, data, length){
+
+
+    let responseMessage = message
 
     if(!data){
         data = {};
-        message = "No data available"
+        responseMessage = message || "No data available"
         success = false
     }
 
     if(data.length === 0){
         data = [];
-        message = "No data available"
+        responseMessage = message || "No data available"
         success = false
     }
 
     return {
         success,
-        message,
-        data
+        message: responseMessage,
+        data,
+        length: length !== undefined ? length : null
     }
 }
