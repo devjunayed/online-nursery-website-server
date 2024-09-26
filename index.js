@@ -66,64 +66,86 @@ async function run() {
       }
     });
 
-    // Get all products
-    app.get("/products", async (req, res) => {
-      let {
-        id,
-        page = "",
-        limit = "",
-        search = "",
-        category,
-        rating,
-      } = req.query;
-      let query = {};
+// Get all products
+app.get("/products", async (req, res) => {
+  let {
+    id,
+    page = 0,
+    limit = 10,
+    search = "",
+    category,
+    rating,
+    sortBy = "",
+    sortOrder = "asc" // Default sorting order, can be 'asc' or 'desc'
+  } = req.query;
 
-      try {
-        if (id) {
-          query._id = new ObjectId(id);
-        }
+  let query = {};
 
-        if (category) {
-          query.category = category;
-        }
+  try {
+    // Filter by ID
+    if (id) {
+      query._id = new ObjectId(id);
+    }
 
-        if (rating) {
-          query.rating = rating;
-        }
+    // Filter by category
+    if (category) {
+      query.category = category;
+    }
 
-        if (search) {
-          query.$or = [
-            { name: { $regex: search, $options: "i" } },
-            { description: { $regex: search, $options: "i" } },
-          ];
-        }
+    // Filter by rating
+    if (rating) {
+      query.rating = rating;
+    }
 
-        page = parseInt(page);
-        limit = parseInt(limit);
+    // Search functionality (search by name or description)
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ];
+    }
 
-        const lengthOfProducts =
-          await productCollection.estimatedDocumentCount();
+    // Pagination parameters
+    page = parseInt(page);
+    limit = parseInt(limit);
 
-        const result = await productCollection
-          .find(query)
-          .skip(page * limit)
-          .limit(limit)
-          .toArray();
+    // Determine sorting order (1 for ascending, -1 for descending)
+    const sortDirection = sortOrder === "desc" ? -1 : 1;
 
-        res.send(
-          sendResponse(
-            true,
-            "All products retrieved successfully",
-            result,
-            lengthOfProducts
-          )
-        );
-      } catch (err) {
-        res
-          .status(500)
-          .send(sendResponse(false, "Error retrieving products", err.message));
-      }
-    });
+    // Sort logic
+    let sort = {};
+    if (sortBy === "title") {
+      sort.title = sortDirection;
+    } else if (sortBy === "price") {
+      sort.price = sortDirection;
+    }
+
+    // Total products count
+    const lengthOfProducts = await productCollection.estimatedDocumentCount();
+
+    // Fetch products with query, sort, and pagination
+    const result = await productCollection
+      .find(query)
+      .sort(sort) // Apply the sort
+      .skip(page * limit)
+      .limit(limit)
+      .toArray();
+
+    // Send response
+    res.send(
+      sendResponse(
+        true,
+        "All products retrieved successfully",
+        result,
+        lengthOfProducts
+      )
+    );
+  } catch (err) {
+    res
+      .status(500)
+      .send(sendResponse(false, "Error retrieving products", err.message));
+  }
+});
 
     // Get single product by ID
     app.get("/products/:id", async (req, res) => {
@@ -253,78 +275,76 @@ async function run() {
     // Create cart endpoint
     app.post("/cart", async (req, res) => {
       const data = req.body;
-      const id = `${data._id}`;
-      delete data._id;
-
-
+      const id = `${data._id}`;  
+      delete data._id;  
+    
       if (!data || Object.keys(data).length === 0) {
         return res.json(sendResponse(false, "Failed to insert data", ""));
       }
-
+    
       try {
-        // finding the product in product collection
+        // Finding the product in the product collection
         const productInTheBackend = await productCollection.findOne({
           _id: new ObjectId(id),
         });
-
-        // checking wheater we have sufficent amount of products
+    
+        if (!productInTheBackend) {
+          return res.json(sendResponse(false, "Product not found", ""));
+        }
+    
+        // Checking if we have sufficient quantity of products
         if (
-          Number(productInTheBackend.quantity) < Number(data.quantity) ||
+          Number(productInTheBackend.quantity) < Number(data.quantity) || 
           Number(data.quantity) <= 0
         ) {
-          return res.send(sendResponse(false, "Insufficient amount", []));
+          return res.send(sendResponse(false, "Insufficient quantity", []));
         }
-
-        // setting new product quantity in the product collection
-        productInTheBackend.quantity = (
-          productInTheBackend.quantity - data.quantity
-        ).toString();
-
+    
+        // Check if the product is already in the cart
         const cartResult = await cartCollection.findOne({
           productId: new ObjectId(id),
         });
-        // updating cart quantity of products if alreadin in the cart
-        if (Object.keys(cartResult).length > 0) {
+    
+        // If product is already in the cart, update the quantity
+        if (cartResult) {
           data.quantity = (
             Number(data.quantity) + Number(cartResult.quantity)
           ).toString();
-
-          // finally updating the quantity
+    
+          // Update the cart quantity
           const updateResult = await cartCollection.updateOne(
             { _id: new ObjectId(cartResult._id) },
-            {$set: data}
+            { $set: data }
           );
-
-
-          // updating stock
-          await productCollection.updateOne(
-            { _id: new ObjectId(id) },
-            { $set: productInTheBackend }
-          );
+    
+       
+    
           return res.send(
-            sendResponse(true, "Cart created successfully", updateResult)
+            sendResponse(true, "Cart updated successfully", updateResult)
           );
         }
-
+    
+        // If product is not in the cart, insert it
         data.productId = new ObjectId(id);
-
-        // updating stock
+    
+        // Update the stock
         await productCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: productInTheBackend }
         );
-
+    
         const result = await cartCollection.insertOne(data);
         return res.send(
           sendResponse(true, "Cart created successfully", result)
         );
+    
       } catch (error) {
-        console.log(error)
-        return res.json(sendResponse(false, "Failed  to create cart", error));
+        console.log(error);
+        return res.json(sendResponse(false, "Failed to create cart", error));
       }
     });
-
-    // Get all categories
+    
+    // Get all cart
     app.get("/cart", async (req, res) => {
       try {
         const result = await cartCollection.find().toArray();
@@ -336,45 +356,21 @@ async function run() {
       }
     });
 
-    // Delete category
-    app.delete("/category/:id", async (req, res) => {
+    // Delete cart
+    app.delete("/cart/:id", async (req, res) => {
       try {
-        const result = await categoryCollection.deleteOne({
+        const result = await cartCollection.deleteOne({
           _id: new ObjectId(req.params.id),
         });
-        res.send(sendResponse(true, "Category deleted successfully", result));
+        res.send(sendResponse(true, "Cart deleted successfully", result));
       } catch (err) {
         res
           .status(500)
-          .send(sendResponse(false, "Error deleting category", err.message));
+          .send(sendResponse(false, "Error deleting cart", err.message));
       }
     });
 
-    // Update category
-    app.patch("/category/:id", async (req, res) => {
-      try {
-        const newData = req.body;
 
-        if (!newData || Object.keys(newData).length === 0) {
-          return res.json(sendResponse(false, "Failed to insert data", ""));
-        }
-        const result = await categoryCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: newData },
-          { upsert: true }
-        );
-        res.send(
-          sendResponse(true, "Category updated successfully", {
-            ...result,
-            ...newData,
-          })
-        );
-      } catch (err) {
-        res
-          .status(500)
-          .send(sendResponse(false, "Error updating category", err.message));
-      }
-    });
 
     // Global error handling middleware
     app.use((err, req, res, next) => {
